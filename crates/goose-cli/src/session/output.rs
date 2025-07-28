@@ -95,10 +95,17 @@ pub struct ThinkingIndicator {
 impl ThinkingIndicator {
     pub fn show(&mut self) {
         let spinner = cliclack::spinner();
-        spinner.start(format!(
-            "{}...",
-            super::thinking::get_random_thinking_message()
-        ));
+        if Config::global()
+            .get_param("RANDOM_THINKING_MESSAGES")
+            .unwrap_or(true)
+        {
+            spinner.start(format!(
+                "{}...",
+                super::thinking::get_random_thinking_message()
+            ));
+        } else {
+            spinner.start("Thinking...");
+        }
         self.spinner = Some(spinner);
     }
 
@@ -799,11 +806,11 @@ impl McpSpinners {
         spinner.set_message(message.to_string());
     }
 
-    pub fn update(&mut self, token: &str, value: f64, total: Option<f64>, message: Option<&str>) {
+    pub fn update(&mut self, token: &str, value: u32, total: Option<u32>, message: Option<&str>) {
         let bar = self.bars.entry(token.to_string()).or_insert_with(|| {
             if let Some(total) = total {
                 self.multi_bar.add(
-                    ProgressBar::new((total * 100.0) as u64).with_style(
+                    ProgressBar::new((total * 100) as u64).with_style(
                         ProgressStyle::with_template("[{elapsed}] {bar:40} {pos:>3}/{len:3} {msg}")
                             .unwrap(),
                     ),
@@ -812,7 +819,7 @@ impl McpSpinners {
                 self.multi_bar.add(ProgressBar::new_spinner())
             }
         });
-        bar.set_position((value * 100.0) as u64);
+        bar.set_position((value * 100) as u64);
         if let Some(msg) = message {
             bar.set_message(msg.to_string());
         }

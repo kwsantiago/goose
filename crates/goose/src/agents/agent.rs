@@ -44,10 +44,10 @@ use crate::providers::utils::{generate_context_suggestions, parse_token_info_fro
 use crate::recipe::{Author, Recipe, Response, Settings, SubRecipe};
 use crate::scheduler_trait::SchedulerTrait;
 use crate::tool_monitor::{ToolCall, ToolMonitor};
-use mcp_core::{protocol::GetPromptResult, ToolError, ToolResult};
+use crate::utils::is_token_cancelled;
+use mcp_core::{ToolError, ToolResult};
 use regex::Regex;
-use rmcp::model::Tool;
-use rmcp::model::{Content, JsonRpcMessage, Prompt};
+use rmcp::model::{Content, GetPromptResult, Prompt, ServerNotification, Tool};
 use serde_json::Value;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
@@ -85,7 +85,7 @@ pub struct Agent {
 #[derive(Clone, Debug)]
 pub enum AgentEvent {
     Message(Message),
-    McpNotification((String, JsonRpcMessage)),
+    McpNotification((String, ServerNotification)),
     ModelChange { model: String, mode: String },
 }
 
@@ -96,19 +96,19 @@ impl Default for Agent {
 }
 
 pub enum ToolStreamItem<T> {
-    Message(JsonRpcMessage),
+    Message(ServerNotification),
     Result(T),
 }
 
 pub type ToolStream = Pin<Box<dyn Stream<Item = ToolStreamItem<ToolResult<Vec<Content>>>> + Send>>;
 
-// tool_stream combines a stream of JsonRpcMessages with a future representing the
+// tool_stream combines a stream of ServerNotifications with a future representing the
 // final result of the tool call. MCP notifications are not request-scoped, but
 // this lets us capture all notifications emitted during the tool call for
 // simpler consumption
 pub fn tool_stream<S, F>(rx: S, done: F) -> ToolStream
 where
-    S: Stream<Item = JsonRpcMessage> + Send + Unpin + 'static,
+    S: Stream<Item = ServerNotification> + Send + Unpin + 'static,
     F: Future<Output = ToolResult<Vec<Content>>> + Send + 'static,
 {
     Box::pin(async_stream::stream! {
@@ -771,7 +771,7 @@ impl Agent {
                 });
 
             loop {
-                if cancel_token.as_ref().is_some_and(|t| t.is_cancelled()) {
+                if is_token_cancelled(&cancel_token) {
                     break;
                 }
 
@@ -807,7 +807,7 @@ impl Agent {
                 let mut tools_updated = false;
 
                 while let Some(next) = stream.next().await {
-                    if cancel_token.as_ref().is_some_and(|t| t.is_cancelled()) {
+                    if is_token_cancelled(&cancel_token) {
                         break;
                     }
 
@@ -992,7 +992,7 @@ impl Agent {
                                     let mut all_install_successful = true;
 
                                     while let Some((request_id, item)) = combined.next().await {
-                                        if cancel_token.as_ref().is_some_and(|t| t.is_cancelled()) {
+                                        if is_token_cancelled(&cancel_token) {
                                             break;
                                         }
                                         match item {
