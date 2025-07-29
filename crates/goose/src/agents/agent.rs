@@ -29,7 +29,6 @@ use crate::agents::subagent_execution_tool::subagent_execute_task_tool::{
     self, SUBAGENT_EXECUTE_TASK_TOOL_NAME,
 };
 use crate::agents::subagent_execution_tool::tasks_manager::TasksManager;
-use crate::agents::token_tracker::{create_shared_tracker, SharedTokenTracker};
 use crate::agents::tool_router_index_manager::ToolRouterIndexManager;
 use crate::agents::tool_vectordb::generate_table_id;
 use crate::agents::types::SessionConfig;
@@ -79,7 +78,6 @@ pub struct Agent {
     pub(super) router_tool_selector: Mutex<Option<Arc<Box<dyn RouterToolSelector>>>>,
     pub(super) scheduler_service: Mutex<Option<Arc<dyn SchedulerTrait>>>,
     pub(super) retry_manager: RetryManager,
-    pub(super) token_tracker: SharedTokenTracker,
 }
 
 #[derive(Clone, Debug)]
@@ -155,7 +153,6 @@ impl Agent {
             router_tool_selector: Mutex::new(None),
             scheduler_service: Mutex::new(None),
             retry_manager,
-            token_tracker: create_shared_tracker(),
         }
     }
 
@@ -190,15 +187,6 @@ impl Agent {
         self.retry_manager.get_attempts().await
     }
 
-    pub async fn token_status(&self) -> String {
-        let tracker = self.token_tracker.read().await;
-        tracker.status()
-    }
-
-    pub async fn reset_tokens(&self) {
-        let mut tracker = self.token_tracker.write().await;
-        tracker.reset();
-    }
 
     /// Handle retry logic for the agent reply loop
     async fn handle_retry_logic(
@@ -842,18 +830,6 @@ impl Agent {
                                 }
                             }
 
-                            // Update token tracker and check for warnings
-                            if let Some(ref usage) = usage {
-                                let mut tracker = self.token_tracker.write().await;
-                                tracker.update_usage(usage);
-
-                                // Check if we need to show a warning
-                                if let Some(warning_msg) = tracker.check_warning() {
-                                    yield AgentEvent::Message(
-                                        Message::assistant().with_text(warning_msg)
-                                    );
-                                }
-                            }
 
                             if let Some(response) = response {
                                 let (tools_with_readonly_annotation, tools_without_annotation) =
@@ -1031,11 +1007,6 @@ impl Agent {
                             // Parse token information from error message
                             let (current_tokens, max_tokens) = parse_token_info_from_error(&provider_msg);
 
-                            // Update token tracker with context limit if we found it
-                            if let Some(max_tokens) = max_tokens {
-                                let mut tracker = self.token_tracker.write().await;
-                                tracker.set_context_limit(max_tokens as usize);
-                            }
 
                             // Get provider name for specific suggestions
                             let provider_name_str = self.provider_name();

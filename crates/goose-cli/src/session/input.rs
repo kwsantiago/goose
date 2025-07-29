@@ -21,7 +21,6 @@ pub enum InputResult {
     Clear,
     Recipe(Option<String>),
     Summarize,
-    ShowTokens,
 }
 
 #[derive(Debug)]
@@ -157,7 +156,6 @@ fn handle_slash_command(input: &str) -> Option<InputResult> {
         s if s == CMD_CLEAR => Some(InputResult::Clear),
         s if s.starts_with(CMD_RECIPE) => parse_recipe_command(s),
         s if s == CMD_SUMMARIZE => Some(InputResult::Summarize),
-        "/tokens" => Some(InputResult::ShowTokens),
         _ => None,
     }
 }
@@ -268,7 +266,6 @@ fn print_help() {
 /recipe [filepath] - Generate a recipe from the current conversation and save it to the specified filepath (must end with .yaml).
                        If no filepath is provided, it will be saved to ./recipe.yaml.
 /summarize - Summarize the current conversation to reduce context length while preserving key information.
-/tokens - Show current token usage and context limit information
 /? or /help - Display this help message
 /clear - Clears the current chat history
 
