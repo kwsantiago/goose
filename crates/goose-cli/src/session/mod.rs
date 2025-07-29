@@ -1153,20 +1153,13 @@ impl Session {
                                         output::render_text("\nOpenRouter suggestion: Use the \"middle-out\" transform to compress your prompt automatically.", Some(Color::Yellow), true);
                                     }
 
-                                    // Give user the same options as MessageContent::ContextLengthExceeded path
-                                    let message = Message::assistant().with_context_length_exceeded(error_msg);
-                                    self.messages.push(message);
-
-                                    // Restart the stream to trigger the normal context handling flow
-                                    stream = self
-                                        .agent
-                                        .reply(
-                                            &self.messages,
-                                            session_config.clone(),
-                                            None
-                                        )
-                                        .await?;
-                                    continue;
+                                    // Show available options to the user
+                                    output::render_text("\nYou can use these commands to manage context:", Some(Color::Yellow), true);
+                                    output::render_text("  /clear - Clear all messages and start fresh", Some(Color::Yellow), true);
+                                    output::render_text("  /summarize - Summarize the conversation to reduce tokens", Some(Color::Yellow), true);
+                                    
+                                    // Break from the loop to return control to user
+                                    break;
                             }
 
                             eprintln!("Error: {}", e);
