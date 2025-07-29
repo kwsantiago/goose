@@ -1157,7 +1157,7 @@ impl Session {
                                     output::render_text("\nYou can use these commands to manage context:", Some(Color::Yellow), true);
                                     output::render_text("  /clear - Clear all messages and start fresh", Some(Color::Yellow), true);
                                     output::render_text("  /summarize - Summarize the conversation to reduce tokens", Some(Color::Yellow), true);
-                                    
+
                                     // Break from the loop to return control to user
                                     break;
                             }
