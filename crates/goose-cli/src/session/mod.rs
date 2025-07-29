@@ -1147,16 +1147,16 @@ impl Session {
                             if let Some(goose::providers::errors::ProviderError::ContextLengthExceeded(error_msg)) = e.downcast_ref::<goose::providers::errors::ProviderError>() {
                                     // Show the context error to the user
                                     output::render_text(&format!("Context length exceeded: {}", error_msg), Some(Color::Red), true);
-                                    
+
                                     // For OpenRouter, check if the error mentions middle-out
                                     if error_msg.contains("middle-out") {
                                         output::render_text("\nOpenRouter suggestion: Use the \"middle-out\" transform to compress your prompt automatically.", Some(Color::Yellow), true);
                                     }
-                                    
+
                                     // Give user the same options as MessageContent::ContextLengthExceeded path
                                     let message = Message::assistant().with_context_length_exceeded(error_msg);
                                     self.messages.push(message);
-                                    
+
                                     // Restart the stream to trigger the normal context handling flow
                                     stream = self
                                         .agent
@@ -1168,7 +1168,7 @@ impl Session {
                                         .await?;
                                     continue;
                             }
-                            
+
                             eprintln!("Error: {}", e);
                             cancel_token_clone.cancel();
                             drop(stream);
