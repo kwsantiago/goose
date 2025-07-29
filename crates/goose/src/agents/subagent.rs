@@ -250,13 +250,12 @@ impl SubAgent {
 
                     // Continue the loop to get the next response from the provider
                 }
-                Err(ProviderError::ContextLengthExceeded(provider_msg)) => {
-                    self.set_status(SubAgentStatus::Completed(format!(
-                        "Context length exceeded: {}",
-                        provider_msg
-                    )))
+                Err(ProviderError::ContextLengthExceeded(_)) => {
+                    self.set_status(SubAgentStatus::Completed(
+                        "Context length exceeded".to_string(),
+                    ))
                     .await;
-                    last_error = Some(anyhow::anyhow!("Context length exceeded: {}", provider_msg));
+                    last_error = Some(anyhow::anyhow!("Context length exceeded"));
                     break;
                 }
                 Err(ProviderError::RateLimitExceeded(_)) => {
