@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::errors::ProviderError;
 use crate::message::Message;
 use crate::model::ModelConfig;
+use crate::utils::safe_truncate;
 use rmcp::model::Tool;
 use utoipa::ToSchema;
 
@@ -115,7 +116,7 @@ impl ProviderMetadata {
                 .iter()
                 .map(|&name| ModelInfo {
                     name: name.to_string(),
-                    context_limit: ModelConfig::new(name.to_string()).context_limit(),
+                    context_limit: ModelConfig::new_or_fail(name).context_limit(),
                     input_token_cost: None,
                     output_token_cost: None,
                     currency: None,
@@ -338,6 +339,48 @@ pub trait Provider: Send + Sync {
             self.get_model_config().model_name
         }
     }
+
+    /// Generate a session name/description based on the conversation history
+    /// This method can be overridden by providers to implement custom session naming strategies.
+    /// The default implementation creates a prompt asking for a concise description in 4 words or less.
+    async fn generate_session_name(&self, messages: &[Message]) -> Result<String, ProviderError> {
+        // Create a prompt for a concise description
+        let mut description_prompt = "Based on the conversation so far, provide a concise description of this session in 4 words or less. This will be used for finding the session later in a UI with limited space - reply *ONLY* with the description".to_string();
+
+        // Get context from the first 3 user messages
+        let context: Vec<String> = messages
+            .iter()
+            .filter(|m| m.role == rmcp::model::Role::User)
+            .take(3)
+            .map(|m| m.as_concat_text())
+            .collect();
+
+        if !context.is_empty() {
+            description_prompt = format!(
+                "Here are the first few user messages:\n{}\n\n{}",
+                context.join("\n"),
+                description_prompt
+            );
+        }
+
+        let message = Message::user().with_text(&description_prompt);
+        let result = self
+            .complete(
+                "Reply with only a description in four words or less",
+                &[message],
+                &[],
+            )
+            .await?;
+
+        let description = result.0.as_concat_text();
+        let sanitized_description = if description.chars().count() > 100 {
+            safe_truncate(&description, 100)
+        } else {
+            description
+        };
+
+        Ok(sanitized_description)
+    }
 }
 
 /// A message stream yields partial text content but complete tool calls, all within the Message object
@@ -358,7 +401,6 @@ mod tests {
     use std::collections::HashMap;
 
     use serde_json::json;
-
     #[test]
     fn test_usage_creation() {
         let usage = Usage::new(Some(10), Some(20), Some(30));

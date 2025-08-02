@@ -364,8 +364,10 @@ impl Session {
     }
 
     /// Process a single message and get the response
-    async fn process_message(&mut self, message: String) -> Result<()> {
-        self.push_message(Message::user().with_text(&message));
+    pub(crate) async fn process_message(&mut self, message: Message) -> Result<()> {
+        let message_text = message.as_concat_text();
+
+        self.push_message(message);
         // Get the provider from the agent for description generation
         let provider = self.agent.provider().await?;
 
@@ -393,9 +395,10 @@ impl Session {
             .and_then(|s| s.to_str())
             .map(|s| s.to_string());
 
-        if let Err(e) =
-            crate::project_tracker::update_project_tracker(Some(&message), session_id.as_deref())
-        {
+        if let Err(e) = crate::project_tracker::update_project_tracker(
+            Some(&message_text),
+            session_id.as_deref(),
+        ) {
             eprintln!(
                 "Warning: Failed to update project tracker with instruction: {}",
                 e
@@ -407,9 +410,10 @@ impl Session {
     }
 
     /// Start an interactive session, optionally with an initial message
-    pub async fn interactive(&mut self, message: Option<String>) -> Result<()> {
+    pub async fn interactive(&mut self, prompt: Option<String>) -> Result<()> {
         // Process initial message if provided
-        if let Some(msg) = message {
+        if let Some(prompt) = prompt {
+            let msg = Message::user().with_text(&prompt);
             self.process_message(msg).await?;
         }
 
@@ -836,11 +840,13 @@ impl Session {
     }
 
     /// Process a single message and exit
-    pub async fn headless(&mut self, message: String) -> Result<()> {
+    pub async fn headless(&mut self, prompt: String) -> Result<()> {
+        let message = Message::user().with_text(&prompt);
         self.process_message(message).await
     }
 
     async fn process_agent_response(&mut self, interactive: bool) -> Result<()> {
+        // Messages will be auto-compacted in agent.reply() if needed
         let cancel_token = CancellationToken::new();
         let cancel_token_clone = cancel_token.clone();
 
@@ -1133,6 +1139,25 @@ impl Session {
                                     );
                                 },
                                 _ => (),
+                            }
+                        }
+                        Some(Ok(AgentEvent::HistoryReplaced(new_messages))) => {
+                            // Replace the session's message history with the compacted messages
+                            self.messages = new_messages;
+
+                            // Persist the updated messages to the session file
+                            if let Some(session_file) = &self.session_file {
+                                let provider = self.agent.provider().await.ok();
+                                let working_dir = std::env::current_dir().ok();
+                                if let Err(e) = session::persist_messages_with_schedule_id(
+                                    session_file,
+                                    &self.messages,
+                                    provider,
+                                    self.scheduled_job_id.clone(),
+                                    working_dir,
+                                ).await {
+                                    eprintln!("Failed to persist compacted messages: {}", e);
+                                }
                             }
                         }
                         Some(Ok(AgentEvent::ModelChange { model, mode })) => {
@@ -1644,7 +1669,7 @@ fn get_reasoner() -> Result<Arc<dyn Provider>, anyhow::Error> {
     };
 
     let model_config =
-        ModelConfig::new_with_context_env(model, Some("GOOSE_PLANNER_CONTEXT_LIMIT"));
+        ModelConfig::new_with_context_env(model, Some("GOOSE_PLANNER_CONTEXT_LIMIT"))?;
     let reasoner = create(&provider, model_config)?;
 
     Ok(reasoner)
