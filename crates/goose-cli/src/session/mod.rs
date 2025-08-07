@@ -1226,81 +1226,26 @@ impl Session {
                         }
 
                         Some(Err(e)) => {
-                            // Check if this is a context length error
+                            // Check if this is a context length error that wasn't already handled by the agent
                             if let Some(goose::providers::errors::ProviderError::ContextLengthExceeded(error_msg)) = e.downcast_ref::<goose::providers::errors::ProviderError>() {
-                                    // Check if this was caused by a tool response
-                                    let should_rollback = if let Some(last_msg) = self.messages.last() {
-                                        last_msg.role == rmcp::model::Role::User &&
-                                        last_msg.content.iter().any(|c| matches!(c, MessageContent::ToolResponse(_)))
-                                    } else {
-                                        false
-                                    };
+                                // The agent should have already handled tool response rollback,
+                                // so this is for any remaining context errors
 
-                                    if should_rollback {
-                                        // This was caused by a tool response - implement rollback
+                                // Show the context error to the user
+                                output::render_text(&format!("Context length exceeded: {}", error_msg), Some(Color::Red), true);
 
-                                        // Get the tool ID from the last message's tool response
-                                        if let Some(tool_id) = self.messages.last().and_then(|msg| {
-                                            msg.content.iter().find_map(|c| match c {
-                                                MessageContent::ToolResponse(resp) => Some(resp.id.clone()),
-                                                _ => None
-                                            })
-                                        }) {
-                                            // Remove the tool response message
-                                            self.messages.pop();
+                                // For OpenRouter, check if the error mentions middle-out
+                                if error_msg.contains("middle-out") {
+                                    output::render_text("\nOpenRouter suggestion: Use the \"middle-out\" transform to compress your prompt automatically.", Some(Color::Yellow), true);
+                                }
 
-                                            // Find and remove the corresponding tool request from the assistant message
-                                            if let Some(assistant_msg) = self.messages.last_mut() {
-                                                if assistant_msg.role == rmcp::model::Role::Assistant {
-                                                    assistant_msg.content.retain(|c| {
-                                                        !matches!(c, MessageContent::ToolRequest(req) if req.id == tool_id)
-                                                    });
-                                                }
-                                            }
+                                // Show available options to the user
+                                output::render_text("\nYou can use these commands to manage context:", Some(Color::Yellow), true);
+                                output::render_text("  /clear - Clear all messages and start fresh", Some(Color::Yellow), true);
+                                output::render_text("  /summarize - Summarize the conversation to reduce tokens", Some(Color::Yellow), true);
 
-                                            // Add error response for this tool
-                                            let mut error_msg = Message::user();
-                                            error_msg.content.push(MessageContent::tool_response(
-                                                tool_id,
-                                                Err(ToolError::ExecutionError(
-                                                    "Tool result exceeded context limits. Try a different approach or read smaller portions.".to_string()
-                                                ))
-                                            ));
-                                            push_message(&mut self.messages, error_msg);
-
-                                            // Persist the rolled-back state
-                                            if let Some(session_file) = &self.session_file {
-                                                if let Err(e) = session::persist_messages_with_schedule_id(
-                                                    session_file,
-                                                    &self.messages,
-                                                    None,
-                                                    self.scheduled_job_id.clone(),
-                                                    std::env::current_dir().ok(),
-                                                ).await {
-                                                    eprintln!("Failed to persist rollback state: {}", e);
-                                                }
-                                            }
-
-                                            // Continue the stream instead of breaking
-                                            continue;
-                                        }
-                                    } else {
-                                        // Show the context error to the user
-                                        output::render_text(&format!("Context length exceeded: {}", error_msg), Some(Color::Red), true);
-
-                                        // For OpenRouter, check if the error mentions middle-out
-                                        if error_msg.contains("middle-out") {
-                                            output::render_text("\nOpenRouter suggestion: Use the \"middle-out\" transform to compress your prompt automatically.", Some(Color::Yellow), true);
-                                        }
-
-                                        // Show available options to the user
-                                        output::render_text("\nYou can use these commands to manage context:", Some(Color::Yellow), true);
-                                        output::render_text("  /clear - Clear all messages and start fresh", Some(Color::Yellow), true);
-                                        output::render_text("  /summarize - Summarize the conversation to reduce tokens", Some(Color::Yellow), true);
-
-                                        // Break from the loop to return control to user
-                                        break;
-                                    }
+                                // Break from the loop to return control to user
+                                break;
                             }
 
                             eprintln!("Error: {}", e);
