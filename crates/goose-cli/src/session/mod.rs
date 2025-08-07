@@ -364,7 +364,12 @@ impl Session {
     }
 
     /// Process a single message and get the response
-    pub(crate) async fn process_message(&mut self, message: Message) -> Result<()> {
+    pub(crate) async fn process_message(
+        &mut self,
+        message: Message,
+        cancel_token: CancellationToken,
+    ) -> Result<()> {
+        let cancel_token = cancel_token.clone();
         let message_text = message.as_concat_text();
 
         self.push_message(message);
@@ -405,7 +410,7 @@ impl Session {
             );
         }
 
-        self.process_agent_response(false).await?;
+        self.process_agent_response(false, cancel_token).await?;
         Ok(())
     }
 
@@ -414,7 +419,8 @@ impl Session {
         // Process initial message if provided
         if let Some(prompt) = prompt {
             let msg = Message::user().with_text(&prompt);
-            self.process_message(msg).await?;
+            self.process_message(msg, CancellationToken::default())
+                .await?;
         }
 
         // Initialize the completion cache
@@ -514,7 +520,8 @@ impl Session {
                             }
 
                             output::show_thinking();
-                            self.process_agent_response(true).await?;
+                            self.process_agent_response(true, CancellationToken::default())
+                                .await?;
                             output::hide_thinking();
                         }
                         RunMode::Plan => {
@@ -814,7 +821,8 @@ impl Session {
                     self.push_message(plan_message);
                     // act on the plan
                     output::show_thinking();
-                    self.process_agent_response(true).await?;
+                    self.process_agent_response(true, CancellationToken::default())
+                        .await?;
                     output::hide_thinking();
 
                     // Reset run & goose mode
@@ -842,12 +850,16 @@ impl Session {
     /// Process a single message and exit
     pub async fn headless(&mut self, prompt: String) -> Result<()> {
         let message = Message::user().with_text(&prompt);
-        self.process_message(message).await
+        self.process_message(message, CancellationToken::default())
+            .await?;
+        Ok(())
     }
 
-    async fn process_agent_response(&mut self, interactive: bool) -> Result<()> {
-        // Messages will be auto-compacted in agent.reply() if needed
-        let cancel_token = CancellationToken::new();
+    async fn process_agent_response(
+        &mut self,
+        interactive: bool,
+        cancel_token: CancellationToken,
+    ) -> Result<()> {
         let cancel_token_clone = cancel_token.clone();
 
         let session_config = self.session_file.as_ref().map(|s| {
@@ -1009,6 +1021,50 @@ impl Session {
                             }
                             // otherwise we have a model/tool to render
                             else {
+                                for content in &message.content {
+                                    if let MessageContent::ToolRequest(tool_request) = content {
+                                        if let Ok(tool_call) = &tool_request.tool_call {
+                                            tracing::info!(counter.goose.tool_calls = 1,
+                                                tool_name = %tool_call.name,
+                                                "Tool call started"
+                                            );
+                                        }
+                                    }
+                                    if let MessageContent::ToolResponse(tool_response) = content {
+                                        let tool_name = self.messages
+                                            .iter()
+                                            .rev()
+                                            .find_map(|msg| {
+                                                msg.content.iter().find_map(|c| {
+                                                    if let MessageContent::ToolRequest(req) = c {
+                                                        if req.id == tool_response.id {
+                                                            if let Ok(tool_call) = &req.tool_call {
+                                                                Some(tool_call.name.clone())
+                                                            } else {
+                                                                None
+                                                            }
+                                                        } else {
+                                                            None
+                                                        }
+                                                    } else {
+                                                        None
+                                                    }
+                                                })
+                                            })
+                                            .unwrap_or_else(|| "unknown".to_string());
+
+                                        let success = tool_response.tool_result.is_ok();
+                                        let result_status = if success { "success" } else { "error" };
+
+                                        tracing::info!(
+                                            counter.goose.tool_completions = 1,
+                                            tool_name = %tool_name,
+                                            result = %result_status,
+                                            "Tool call completed"
+                                        );
+                                    }
+                                }
+
                                 push_message(&mut self.messages, message.clone());
 
                                 // No need to update description on assistant messages
@@ -1040,23 +1096,21 @@ impl Session {
                                             if let Some(Value::String(msg)) = o.get("message") {
                                                 // Extract subagent info for better display
                                                 let subagent_id = o.get("subagent_id")
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("unknown");
+                                                    .and_then(|v| v.as_str());
                                                 let notification_type = o.get("type")
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("");
+                                                    .and_then(|v| v.as_str());
 
                                                 let formatted = match notification_type {
-                                                    "subagent_created" | "completed" | "terminated" => {
+                                                    Some("subagent_created") | Some("completed") | Some("terminated") => {
                                                         format!("🤖 {}", msg)
                                                     }
-                                                    "tool_usage" | "tool_completed" | "tool_error" => {
+                                                    Some("tool_usage") | Some("tool_completed") | Some("tool_error") => {
                                                         format!("🔧 {}", msg)
                                                     }
-                                                    "message_processing" | "turn_progress" => {
+                                                    Some("message_processing") | Some("turn_progress") => {
                                                         format!("💭 {}", msg)
                                                     }
-                                                    "response_generated" => {
+                                                    Some("response_generated") => {
                                                         // Check verbosity setting for subagent response content
                                                         let config = Config::global();
                                                         let min_priority = config
@@ -1080,7 +1134,7 @@ impl Session {
                                                         msg.to_string()
                                                     }
                                                 };
-                                                (formatted, Some(subagent_id.to_string()), Some(notification_type.to_string()))
+                                                (formatted, subagent_id.map(str::to_string), notification_type.map(str::to_string))
                                             } else if let Some(Value::String(output)) = o.get("output") {
                                                 // Fallback for other MCP notification types
                                                 (output.to_owned(), None, None)
@@ -1116,14 +1170,10 @@ impl Session {
                                             }
                                         }
                                     }
-                                    else {
-                                        // Non-subagent notification, display immediately with compact spacing
-                                        if interactive {
-                                            let _ = progress_bars.hide();
-                                            println!("{}", console::style(&formatted_message).green().dim());
-                                        } else {
-                                            progress_bars.log(&formatted_message);
-                                        }
+                                    else if output::is_showing_thinking() {
+                                        output::set_thinking_message(&formatted_message);
+                                    } else {
+                                        progress_bars.log(&formatted_message);
                                     }
                                 },
                                 ServerNotification::ProgressNotification(notification) => {
@@ -1583,7 +1633,8 @@ impl Session {
 
                     if valid {
                         output::show_thinking();
-                        self.process_agent_response(true).await?;
+                        self.process_agent_response(true, CancellationToken::default())
+                            .await?;
                         output::hide_thinking();
                     }
                 }

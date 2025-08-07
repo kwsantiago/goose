@@ -243,26 +243,38 @@ impl ModelConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use temp_env::with_var;
 
     #[test]
+    #[serial]
     fn test_model_config_context_limits() {
-        let config = ModelConfig::new("claude-3-opus")
-            .unwrap()
-            .with_context_limit(Some(150_000));
-        assert_eq!(config.context_limit(), 150_000);
+        // Clear all GOOSE environment variables to ensure clean test environment
+        with_var("GOOSE_TEMPERATURE", None::<&str>, || {
+            with_var("GOOSE_CONTEXT_LIMIT", None::<&str>, || {
+                with_var("GOOSE_TOOLSHIM", None::<&str>, || {
+                    with_var("GOOSE_TOOLSHIM_OLLAMA_MODEL", None::<&str>, || {
+                        let config = ModelConfig::new("claude-3-opus")
+                            .unwrap()
+                            .with_context_limit(Some(150_000));
+                        assert_eq!(config.context_limit(), 150_000);
 
-        let config = ModelConfig::new("claude-3-opus").unwrap();
-        assert_eq!(config.context_limit(), 200_000);
+                        let config = ModelConfig::new("claude-3-opus").unwrap();
+                        assert_eq!(config.context_limit(), 200_000);
 
-        let config = ModelConfig::new("gpt-4-turbo").unwrap();
-        assert_eq!(config.context_limit(), 128_000);
+                        let config = ModelConfig::new("gpt-4-turbo").unwrap();
+                        assert_eq!(config.context_limit(), 128_000);
 
-        let config = ModelConfig::new("unknown-model").unwrap();
-        assert_eq!(config.context_limit(), DEFAULT_CONTEXT_LIMIT);
+                        let config = ModelConfig::new("unknown-model").unwrap();
+                        assert_eq!(config.context_limit(), DEFAULT_CONTEXT_LIMIT);
+                    });
+                });
+            });
+        });
     }
 
     #[test]
+    #[serial]
     fn test_invalid_context_limit() {
         with_var("GOOSE_CONTEXT_LIMIT", Some("abc"), || {
             let result = ModelConfig::new("test-model");
@@ -285,6 +297,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_invalid_temperature() {
         with_var("GOOSE_TEMPERATURE", Some("hot"), || {
             let result = ModelConfig::new("test-model");
@@ -298,6 +311,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_invalid_toolshim() {
         with_var("GOOSE_TOOLSHIM", Some("maybe"), || {
             let result = ModelConfig::new("test-model");
@@ -311,6 +325,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_empty_toolshim_model() {
         with_var("GOOSE_TOOLSHIM_OLLAMA_MODEL", Some(""), || {
             let result = ModelConfig::new("test-model");
@@ -328,6 +343,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_valid_configurations() {
         // Test with environment variables set
         with_var("GOOSE_CONTEXT_LIMIT", Some("50000"), || {
