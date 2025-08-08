@@ -1226,28 +1226,6 @@ impl Session {
                         }
 
                         Some(Err(e)) => {
-                            // Check if this is a context length error that wasn't already handled by the agent
-                            if let Some(goose::providers::errors::ProviderError::ContextLengthExceeded(error_msg)) = e.downcast_ref::<goose::providers::errors::ProviderError>() {
-                                // The agent should have already handled tool response rollback,
-                                // so this is for any remaining context errors
-
-                                // Show the context error to the user
-                                output::render_text(&format!("Context length exceeded: {}", error_msg), Some(Color::Red), true);
-
-                                // For OpenRouter, check if the error mentions middle-out
-                                if error_msg.contains("middle-out") {
-                                    output::render_text("\nOpenRouter suggestion: Use the \"middle-out\" transform to compress your prompt automatically.", Some(Color::Yellow), true);
-                                }
-
-                                // Show available options to the user
-                                output::render_text("\nYou can use these commands to manage context:", Some(Color::Yellow), true);
-                                output::render_text("  /clear - Clear all messages and start fresh", Some(Color::Yellow), true);
-                                output::render_text("  /summarize - Summarize the conversation to reduce tokens", Some(Color::Yellow), true);
-
-                                // Break from the loop to return control to user
-                                break;
-                            }
-
                             eprintln!("Error: {}", e);
                             cancel_token_clone.cancel();
                             drop(stream);
