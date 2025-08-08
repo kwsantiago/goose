@@ -1660,7 +1660,6 @@ fn get_reasoner() -> Result<Arc<dyn Provider>, anyhow::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use goose::message::MessageContent;
     use mcp_core::handler::ToolError;
     use rmcp::model::Role;
 
@@ -1699,7 +1698,7 @@ mod tests {
                 arguments: serde_json::Value::Object(serde_json::Map::new()),
             }),
         ));
-        push_message(&mut messages, assistant_msg);
+        messages.push(assistant_msg);
 
         // Add a user message with tool response
         let mut user_msg = Message::user();
@@ -1709,7 +1708,7 @@ mod tests {
                 "Very large response that causes context overflow",
             )]),
         ));
-        push_message(&mut messages, user_msg);
+        messages.push(user_msg);
 
         assert_eq!(messages.len(), 2);
 
@@ -1740,7 +1739,7 @@ mod tests {
                     "Tool result exceeded context limits. Try a different approach or read smaller portions.".to_string()
                 ))
             ));
-            push_message(&mut messages, error_msg);
+            messages.push(error_msg);
         }
 
         // Verify the state after rollback
